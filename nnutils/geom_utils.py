@@ -615,12 +615,12 @@ def sample_xy(img_size, bs, nsample, device, return_all=False, lineid=None):
     else:
         if lineid is None:
             probs = torch.ones(img_size**2).to(device) # 512*512 vs 128*64
-            rand_inds = torch.multinomial(probs, bs*nsample, replacement=False)
+            rand_inds = torch.multinomial(probs, bs*nsample, replacement=False) # 비복원추출
             rand_inds = rand_inds.view(bs,nsample)
             xys = torch.stack([xygrid[0][rand_inds[i]] for i in range(bs)],0) # bs,ns,2
         else:
             probs = torch.ones(img_size).to(device) # 512*512 vs 128*64
-            rand_inds = torch.multinomial(probs, bs*nsample, replacement=True)
+            rand_inds = torch.multinomial(probs, bs*nsample, replacement=True)  # 복원추출
             rand_inds = rand_inds.view(bs,nsample)
             xys = torch.stack([xygrid[0][rand_inds[i]] for i in range(bs)],0) # bs,ns,2
             xys[...,1] = xys[...,1] + lineid[:,None]

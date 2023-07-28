@@ -790,7 +790,7 @@ class banmo(nn.Module):
 
         return total_loss, aux_out
     
-    def nerf_render(self, rtk, kaug, embedid, nsample=256, ndepth=128):
+    def nerf_render(self, rtk, kaug, embedid, nsample=256, ndepth=128, vis_ray=False, vis_active=False):
         opts=self.opts
         # render rays
         if opts.debug:
@@ -803,9 +803,15 @@ class banmo(nn.Module):
         
         # for batch:2bs,            nsample+x
         # for line: 2bs*(nsample+x),1
-        rand_inds, rays, frameid, errid = self.sample_pxs(bs, nsample, Rmat, Tmat, Kinv,
-        self.dataid, self.frameid, self.frameid_sub, self.embedid,self.lineid,self.errid,
-        self.imgs, self.masks, self.vis2d, self.flow, self.occ, self.dp_feats)
+        if vis_active:
+            rand_inds, rays, frameid, errid = self.sample_pxs(bs, nsample, Rmat, Tmat, Kinv,
+                self.dataid, self.frameid, self.frameid_sub, self.embedid,self.lineid,self.errid,
+                self.imgs, self.masks, self.vis2d, self.flow, self.occ, self.dp_feats, True)
+        else:
+            rand_inds, rays, frameid, errid = self.sample_pxs(bs, nsample, Rmat, Tmat, Kinv,
+                self.dataid, self.frameid, self.frameid_sub, self.embedid,self.lineid,self.errid,
+                self.imgs, self.masks, self.vis2d, self.flow, self.occ, self.dp_feats, False)
+
         self.frameid = frameid # only used in loss filter
         self.errid = errid
 
@@ -836,6 +842,7 @@ class banmo(nn.Module):
                         img_size=self.img_size,
                         progress=self.progress,
                         opts=opts,
+                        vis_ray=vis_ray
                         )
             for k, v in rendered_chunks.items():
                 results[k] += [v]
@@ -988,11 +995,12 @@ class banmo(nn.Module):
 
     def sample_pxs(self, bs, nsample, Rmat, Tmat, Kinv,
                    dataid, frameid, frameid_sub, embedid, lineid,errid,
-                   imgs, masks, vis2d, flow, occ, dp_feats):
-        """
+                   imgs, masks, vis2d, flow, occ, dp_feats, active_sampling=False):
+        """         
         make sure self. is not modified
         xys:    bs, nsample, 2
         rand_inds: bs, nsample
+        # active_sampling = for visualization only.
         """
         opts = self.opts
         Kinv_in=Kinv.clone()
@@ -1002,8 +1010,9 @@ class banmo(nn.Module):
         # sample 1x points, sample 4x points for further selection
         nsample_a = 4*nsample
         rand_inds, xys = sample_xy(self.img_size, bs, nsample+nsample_a, self.device,
-                               return_all= not(self.training), lineid=lineid)
-
+                               return_all= not(self.training or active_sampling), lineid=lineid)
+                                # CUSTOM : (+) or active_sampling
+        print("ln1015 : ", xys.shape)
         if self.training and opts.use_unc and \
                 self.progress >= (opts.warmup_steps):
             is_active=True
@@ -1012,7 +1021,14 @@ class banmo(nn.Module):
         else:
             is_active=False
 
-        if self.training:
+        if active_sampling: # For visualization
+            print("active_sampling")
+            opts.nactive = 1
+            is_active=True
+            nsample_s = int(opts.nactive * nsample)  # active 
+            nsample   = int(nsample*(1-opts.nactive)) # uniform
+
+        if self.training or active_sampling: # CUSTOM
             rand_inds_a, xys_a = rand_inds[:,-nsample_a:].clone(), xys[:,-nsample_a:].clone()
             rand_inds, xys     = rand_inds[:,:nsample].clone(), xys[:,:nsample].clone()
 
@@ -1037,7 +1053,8 @@ class banmo(nn.Module):
                 batch_map   = torch.Tensor(range(bs)).to(self.device)[:,None].long()
                 batch_map_a = batch_map.repeat(1,nsample_a)
                 batch_map   = batch_map.repeat(1,nsample)
-
+                # print("ln1055", Rmat_a.shape, Rmat.shape)
+                # print("ln1055", xys_a.shape, xys.shape)
         # importance sampling
         if is_active:
             with torch.no_grad():
@@ -1097,7 +1114,8 @@ class banmo(nn.Module):
                 Rmat_a =             torch.stack(  [Rmat_a[i][topk_samp[0]] for i in range(bs)],0)
                 Tmat_a =             torch.stack(  [Tmat_a[i][topk_samp[0]] for i in range(bs)],0)
                 Kinv_a =             torch.stack(  [Kinv_a[i][topk_samp[0]] for i in range(bs)],0)
-
+                # print("ln1115", Rmat_a.shape, Rmat.shape)
+                # print("ln1115", xys_a.shape, xys.shape)
                 xys =       torch.cat([xys,xys_a],1)
                 rand_inds = torch.cat([rand_inds,rand_inds_a],1)
                 frameid =   torch.cat([frameid,frameid_a],1)
@@ -1108,6 +1126,8 @@ class banmo(nn.Module):
                 Rmat =      torch.cat([Rmat,Rmat_a],1)
                 Tmat =      torch.cat([Tmat,Tmat_a],1)
                 Kinv =      torch.cat([Kinv,Kinv_a],1)
+                # print("ln1126", Rmat_a.shape, Rmat.shape)
+                # print("ln1126", xys_a.shape, xys.shape)
             else:
                 topk_samp = unc_pred.topk(nsample_s,dim=-1)[1] # bs,nsamp
                 
@@ -1119,7 +1139,8 @@ class banmo(nn.Module):
         
 
         # for line: reshape to 2*bs, 1,...
-        if self.training and opts.lineload:
+        # if self.training and opts.lineload:   # CUSTOM
+        if (self.training and opts.lineload) and active_sampling:
             frameid =         frameid.view(-1)
             frameid_sub = frameid_sub.view(-1)
             dataid =           dataid.view(-1)
@@ -1132,8 +1153,32 @@ class banmo(nn.Module):
             Kinv = Kinv.view(-1,3,3)
 
         near_far = self.near_far[frameid.long()]
+
+        if active_sampling:
+            Rmat = Rmat[:, 0, :, :]
+            Tmat = Tmat[:, 0, :]
+            Kinv = Kinv[:, 0, :, :]
+            near_far = near_far[:, 0, :]
+            frameid = frameid[:, 0]
+            frameid_sub = frameid_sub[:, 0]
+            dataid = dataid[:, 0]
+
+        # print(xys.shape)
+        # print(Rmat.shape)
+        # print(Tmat.shape)
+        # print(Kinv.shape)
+        # print(near_far.shape)   # 2, 2
+        # print(dataid.shape)
+        # print(frameid_sub.shape)
+        # print(frameid.shape)
+
+        # TODO : 그냥 active sampled 를 저장한 다음에 obj 로 바꿔서 plot 해버리자...
+        
         rays = raycast(xys, Rmat, Tmat, Kinv, near_far)
-       
+
+        if active_sampling:
+            np.save('active_sampling.npy', rays['xys'].cpu().numpy())
+            exit()
         # need to reshape dataid, frameid_sub, embedid #TODO embedid equiv to frameid
         self.update_rays(rays, bs>1, dataid, frameid_sub, frameid, xys, Kinv)
         
@@ -1144,7 +1189,7 @@ class banmo(nn.Module):
         # for line: 2bs*nsamp,1
         # for batch:2bs,nsamp
         #TODO reshape imgs, masks, etc.
-        if self.training and opts.lineload:
+        if (self.training and opts.lineload):
             self.obs_to_rays_line(rays, rand_inds, imgs, masks, vis2d, flow, occ, 
                     dp_feats, batch_map)
         else:
@@ -1188,6 +1233,8 @@ class banmo(nn.Module):
         """
         opts = self.opts
         bs = imgs.shape[0]
+        # print('obs_to_rays', imgs.shape)
+        # print('obs_to_rays', rand_inds.shape)
         rays['img_at_samp'] = torch.stack([imgs[i].view(3,-1).T[rand_inds[i]]\
                                 for i in range(bs)],0) # bs,ns,3
         rays['sil_at_samp'] = torch.stack([masks[i].view(-1,1)[rand_inds[i]]\

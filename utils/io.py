@@ -332,6 +332,7 @@ def get_config_info(opts, config, name, dataid, is_eval=False):
     load_attr(attrs, config, 'data')
     load_attr(attrs, config, name)
     datapath = attrs['datapath']
+    print("utils/io.py : datapath : ", datapath)
     if 'dframe' in opts.keys():
         dframe = opts['dframe'] # only in preload
     else:
@@ -440,7 +441,13 @@ class LineDataset(Dataset):
         dframe = np.random.choice(dframe_list)
 
         data_path = '%s/%d_%05d/%04d.npy'%(save_dir, dframe, idt, idy)
-        elem = np.load(data_path,allow_pickle=True).item()
+        
+        try:
+            elem = np.load(data_path,allow_pickle=True).item()
+        except:
+            print("Error occur : _getitem_ - ", data_path)
+            return None
+
         # modify dataid according to training time ones
 
         # reload rtk based on rtk predictions

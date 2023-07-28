@@ -61,6 +61,7 @@ predictor_dp, embedder, mesh_vertex_embeddings = create_cse(config_path,
    
 counter=0 
 frames = []
+print("img dir : ", imgdir)
 for i,path in enumerate(sorted(glob.glob('%s/*'%imgdir))):
     print(path)
     img = cv2.imread(path)
@@ -118,6 +119,6 @@ for i,path in enumerate(sorted(glob.glob('%s/*'%imgdir))):
     
     counter+=1
     frames.append(mask_result[:,:,::-1])    
-  
+    
 save_vid('%s/vis'%dpdir, frames, suffix='.mp4')
 save_vid('%s/vis'%dpdir, frames, suffix='.gif')

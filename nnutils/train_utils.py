@@ -212,8 +212,8 @@ class v2s_trainer():
             elif 'csenet' in name:
                 params_csenet.append(p)
             else: continue
-            if opts.local_rank==0:
-                print('optimized params: %s'%name)
+            # if opts.local_rank==0:
+            #     print('optimized params: %s'%name)
 
         self.optimizer = torch.optim.AdamW(
             [{'params': params_nerf_coarse},
@@ -602,6 +602,153 @@ class v2s_trainer():
                 #            suffix='.gif', upsample_frame=upsample_frame, 
                 #            is_flow=is_flow)
 
+        return rendered_seq, aux_seq
+    
+    def vis_ray(self, idx_render=None, dynamic_mesh=False): 
+        """
+        idx_render: list of frame index to render
+        dynamic_mesh: whether to extract canonical shape, or dynamic shape
+        """
+        opts = self.opts
+        with torch.no_grad():
+            self.model.eval()
+
+            # run marching cubes on canonical shape
+            mesh_dict_rest = self.extract_mesh(self.model, opts.chunk, \
+                                         opts.sample_grid3d, opts.mc_threshold)
+
+            # choose a grid image or the whold video
+            if idx_render is None: # render 9 frames
+                idx_render = np.linspace(0,len(self.evalloader)-1, 9, dtype=int)
+
+            # render
+            chunk=opts.rnd_frame_chunk
+            rendered_seq = defaultdict(list)
+            aux_seq = {'mesh_rest': mesh_dict_rest['mesh'],
+                       'mesh':[],
+                       'rtk':[],
+                       'impath':[],
+                       'bone':[],}
+            
+            for j in range(0, len(idx_render), chunk):
+                batch = []
+                idx_chunk = idx_render[j:j+chunk]
+                for i in idx_chunk:
+                    batch.append( self.evalloader.dataset[i] )
+                batch = self.evalloader.collate_fn(batch)
+                rendered = self.render_vid_ray(self.model, batch) 
+                # TODO
+
+                for k, v in rendered.items():
+                    rendered_seq[k] += [v]
+                    
+                hbs=len(idx_chunk)
+                sil_rszd = F.interpolate(self.model.masks[:hbs,None], 
+                            (opts.render_size, opts.render_size))[:,0,...,None]
+                rendered_seq['img'] += [self.model.imgs.permute(0,2,3,1)[:hbs]]
+                rendered_seq['sil'] += [self.model.masks[...,None]      [:hbs]]
+                rendered_seq['flo'] += [self.model.flow.permute(0,2,3,1)[:hbs]]
+                rendered_seq['dpc'] += [self.model.dp_vis[self.model.dps.long()][:hbs]]
+                rendered_seq['occ'] += [self.model.occ[...,None]      [:hbs]]
+                rendered_seq['feat']+= [self.model.dp_feats.std(1)[...,None][:hbs]]
+
+                # extract mesh sequences
+                for idx in range(len(idx_chunk)):
+                    frameid=self.model.frameid[idx].long()
+                    embedid=self.model.embedid[idx].long()
+                    print('extracting frame %d'%(frameid.cpu().numpy()))
+                    # run marching cubes
+                    if dynamic_mesh:
+                        if not opts.queryfw:
+                           mesh_dict_rest=None 
+                        mesh_dict = self.extract_mesh(self.model,opts.chunk,
+                                            opts.sample_grid3d, opts.mc_threshold,
+                                        embedid=embedid, mesh_dict_in=mesh_dict_rest)
+                        mesh=mesh_dict['mesh']
+                        if mesh_dict_rest is not None and opts.ce_color:
+                            mesh.visual.vertex_colors = mesh_dict_rest['mesh'].\
+                                   visual.vertex_colors # assign rest surface color
+                        else:
+                            # get view direction 
+                            obj_center = self.model.rtk[idx][:3,3:4]
+                            cam_center = -self.model.rtk[idx][:3,:3].T.matmul(obj_center)[:,0]
+                            view_dir = torch.cuda.FloatTensor(mesh.vertices, device=self.device) \
+                                            - cam_center[None]
+                            vis = get_vertex_colors(self.model, mesh_dict_rest['mesh'], 
+                                                    frame_idx=idx, view_dir=view_dir)
+                            mesh.visual.vertex_colors[:,:3] = vis*255
+
+                        # save bones
+                        if 'bones' in mesh_dict.keys():
+                            bone = mesh_dict['bones'][0].cpu().numpy()
+                            aux_seq['bone'].append(bone)
+                    else:
+                        mesh=mesh_dict_rest['mesh']
+                    aux_seq['mesh'].append(mesh)
+
+                    # save cams
+                    aux_seq['rtk'].append(self.model.rtk[idx].cpu().numpy())
+                    
+                    # save image list
+                    impath = self.model.impath[frameid]
+                    aux_seq['impath'].append(impath)
+
+            # save canonical mesh and extract skinning weights
+            mesh_rest = aux_seq['mesh_rest']
+            if len(mesh_rest.vertices)>100:
+                self.model.latest_vars['mesh_rest'] = mesh_rest
+            if opts.lbs:
+                bones_rst = self.model.bones
+                bones_rst,_ = correct_bones(self.model, bones_rst)
+                # compute skinning color
+                if mesh_rest.vertices.shape[0]>100:
+                    rest_verts = torch.Tensor(mesh_rest.vertices).to(self.device)
+                    nerf_skin = self.model.nerf_skin if opts.nerf_skin else None
+                    rest_pose_code = self.model.rest_pose_code(torch.Tensor([0])\
+                                            .long().to(self.device))
+                    skins = gauss_mlp_skinning(rest_verts[None], 
+                            self.model.embedding_xyz,
+                            bones_rst, rest_pose_code, 
+                            nerf_skin, skin_aux=self.model.skin_aux)[0]
+                    skins = skins.cpu().numpy()
+   
+                    num_bones = skins.shape[-1]
+                    colormap = label_colormap()
+                    # TODO use a larger color map
+                    colormap = np.repeat(colormap[None],4,axis=0).reshape(-1,3)
+                    colormap = colormap[:num_bones]
+                    colormap = (colormap[None] * skins[...,None]).sum(1)
+
+                    mesh_rest_skin = mesh_rest.copy()
+                    mesh_rest_skin.visual.vertex_colors = colormap
+                    aux_seq['mesh_rest_skin'] = mesh_rest_skin
+
+                aux_seq['bone_rest'] = bones_rst.cpu().numpy()
+        
+            # draw camera trajectory
+            suffix_id=0
+            if hasattr(self.model, 'epoch'):
+                suffix_id = self.model.epoch
+            if opts.local_rank==0:
+                mesh_cam = draw_cams(aux_seq['rtk'])
+                mesh_cam.export('%s/mesh_cam-%02d.obj'%(self.save_dir,suffix_id))
+            
+                mesh_path = '%s/mesh_rest-%02d.obj'%(self.save_dir,suffix_id)
+                mesh_rest.export(mesh_path)
+
+                if opts.lbs:
+                    bone_rest = aux_seq['bone_rest']
+                    bone_path = '%s/bone_rest-%02d.obj'%(self.save_dir,suffix_id)
+                    save_bones(bone_rest, 0.1, bone_path)
+        
+        aux_seq['obj_bound'] = self.model.latest_vars['obj_bound']
+        print("train_utils.py rendered_seq.keys() : ", rendered_seq.keys())
+        print("train_utils.py aux_seq.keys() : ", aux_seq.keys())
+        """
+        aux_seq['bone_rest'] : bone at canonical space (1)
+        aux_seq['bone'] : bone at camera space , (N)
+
+        """
         return rendered_seq, aux_seq
 
     def train(self):
@@ -1306,7 +1453,7 @@ class v2s_trainer():
                 #num_coarse = 10 # out of 10
                 #num_coarse = 1 # out of 10
            #     p.grad[:,:3] = 0 # xyz
-           #     p.grad[:,3:pos_dim].view(out_dim,-1,6)[:,:num_coarse] = 0 # xyz-coarse
+           #     p.grad[:,3:pos_render_viddim].view(out_dim,-1,6)[:,:num_coarse] = 0 # xyz-coarse
                 p.grad[:,pos_dim:] = 0 # others
             else:
                 param_list.append(p)
@@ -1321,6 +1468,7 @@ class v2s_trainer():
         embedid=model.embedid
 
         rendered, _ = model.nerf_render(rtk, kaug, embedid, ndepth=opts.ndepth)
+
         if 'xyz_camera_vis' in rendered.keys():    del rendered['xyz_camera_vis']   
         if 'xyz_canonical_vis' in rendered.keys(): del rendered['xyz_canonical_vis']
         if 'pts_exp_vis' in rendered.keys():       del rendered['pts_exp_vis']      
@@ -1332,6 +1480,27 @@ class v2s_trainer():
                 rendered_first[k] = v[:bs//2] # remove loss term
         return rendered_first 
 
+    @staticmethod 
+    def render_vid_ray(model, batch):
+        opts=model.opts
+        model.set_input(batch)
+        rtk = model.rtk
+        kaug=model.kaug.clone()
+        embedid=model.embedid
+
+        rendered, _ = model.nerf_render(rtk, kaug, embedid, ndepth=opts.ndepth, vis_ray=True, vis_active=False)
+        
+        if 'xyz_camera_vis' in rendered.keys():    del rendered['xyz_camera_vis']   
+        if 'xyz_canonical_vis' in rendered.keys(): del rendered['xyz_canonical_vis']
+        if 'pts_exp_vis' in rendered.keys():       del rendered['pts_exp_vis']      
+        if 'pts_pred_vis' in rendered.keys():      del rendered['pts_pred_vis']     
+        rendered_first = {}
+        for k,v in rendered.items():
+            if v.dim()>0: 
+                bs=v.shape[0]
+                rendered_first[k] = v[:bs//2] # remove loss term
+        return rendered_first 
+    
     @staticmethod
     def extract_mesh(model,chunk,grid_size,
                       #threshold = -0.005,

@@ -13,6 +13,7 @@ from nnutils.geom_utils import lbs, Kmatinv, mat2K, pinhole_cam, obj_to_cam,\
                                gauss_mlp_skinning, diff_flo
 from nnutils.loss_utils import elastic_loss, visibility_loss, feat_match_loss,\
                                 kp_reproj_loss, compute_pts_exp, kp_reproj, evaluate_mlp
+import copy
 
 def render_rays(models,
                 embeddings,
@@ -28,6 +29,7 @@ def render_rays(models,
                 progress=None,
                 opts=None,
                 render_vis=False,
+                vis_ray=False
                 ):
     """
     Render rays by computing the output of @model applied on @rays
@@ -85,6 +87,8 @@ def render_rays(models,
     xyz_sampled = rays_o.unsqueeze(1) + \
                          rays_d.unsqueeze(1) * z_vals.unsqueeze(2) # (N_rays, N_samples, 3)
 
+    xyz_sampled_save = copy.deepcopy(xyz_sampled.cpu())
+
     if use_fine: # sample points for fine model
         # output: 
         #  loss:   'img_coarse', 'sil_coarse', 'feat_err', 'proj_err' 
@@ -111,17 +115,29 @@ def render_rays(models,
 
         N_samples = N_samples + N_importance # get back to original # of samples
     
+    if vis_ray:
+        return_alpha = True
+    else:
+        return_alpha = False
+    
     result, _ = inference_deform(xyz_sampled, rays, models, 
                           chunk, N_samples,
                           N_rays, embedding_xyz, rays_d, noise_std,
                           obj_bound, dir_embedded, z_vals,
-                          img_size, progress,opts,render_vis=render_vis)
+                          img_size, progress,opts,render_vis=render_vis,
+                          return_alpha=return_alpha     # CUSTOM
+                          )
+    if vis_ray:
+        result['ray_camera'] = xyz_sampled_save
+        result['ray_origin'] = rays_o
 
     return result
     
 def inference(models, embedding_xyz, xyz_, dir_, dir_embedded, z_vals, 
-        N_rays, N_samples,chunk, noise_std,
-        env_code=None, weights_only=False, clip_bound = None, vis_pred=None):
+        N_rays, N_samples, chunk, noise_std,
+        env_code=None, weights_only=False, clip_bound = None, vis_pred=None,
+        return_alpha=False  # CUSTOM
+        ):
     """
     Helper function that performs model inference.
 
@@ -199,6 +215,8 @@ def inference(models, embedding_xyz, xyz_, dir_, dir_embedded, z_vals,
 
     alphas = 1-torch.exp(-deltas*sigmas) # (N_rays, N_samples_), p_i
 
+    if return_alpha:
+        alphas_save = alphas.clone().cpu()
     #set out-of-bound and nonvisible alphas to zero
     if clip_bound is not None:
         clip_bound = torch.Tensor(clip_bound).to(xyz_.device)[None,None]
@@ -220,13 +238,17 @@ def inference(models, embedding_xyz, xyz_, dir_, dir_embedded, z_vals,
     feat_final = torch.sum(weights.unsqueeze(-1)*feat, -2) # (N_rays, 3)
     depth_final = torch.sum(weights*z_vals, -1) # (N_rays)
 
+    if return_alpha:
+        return rgb_final, feat_final, depth_final, weights, visibility, alphas_save
     return rgb_final, feat_final, depth_final, weights, visibility
     
 def inference_deform(xyz_coarse_sampled, rays, models, chunk, N_samples,
                          N_rays, embedding_xyz, rays_d, noise_std,
                          obj_bound, dir_embedded, z_vals,
                          img_size, progress,opts, fine_iter=True, 
-                         render_vis=False):
+                         render_vis=False,
+                         return_alpha=False # CUSTOM
+                         ):
     """
     fine_iter: whether to render loss-related terms
     render_vis: used for novel view synthesis
@@ -296,6 +318,10 @@ def inference_deform(xyz_coarse_sampled, rays, models, chunk, N_samples,
                                                   skin_backward,
                                                   xyz_coarse_sampled,
                                                   )
+        # CUSTOM
+        xyz_canonical = copy.deepcopy(xyz_coarse_sampled.cpu())
+        skin_backward_save = copy.deepcopy(skin_backward.cpu())
+        # xyz_coarse_sampled -> ray at canonical space
 
         if fine_iter:
             #if opts.dist_corresp:
@@ -351,17 +377,29 @@ def inference_deform(xyz_coarse_sampled, rays, models, chunk, N_samples,
     else:
         xyz_input = xyz_coarse_sampled
 
-    rgb_coarse, feat_rnd, depth_rnd, weights_coarse, vis_coarse = \
+    if return_alpha:
+        rgb_coarse, feat_rnd, depth_rnd, weights_coarse, vis_coarse, alphas = \
         inference(models, embedding_xyz, xyz_input, rays_d,
                 dir_embedded, z_vals, N_rays, N_samples, chunk, noise_std,
                 weights_only=False, env_code=env_code, 
-                clip_bound=clip_bound, vis_pred=vis_pred)
+                clip_bound=clip_bound, vis_pred=vis_pred, return_alpha=return_alpha)
+    else:
+        rgb_coarse, feat_rnd, depth_rnd, weights_coarse, vis_coarse = \
+            inference(models, embedding_xyz, xyz_input, rays_d,
+                    dir_embedded, z_vals, N_rays, N_samples, chunk, noise_std,
+                    weights_only=False, env_code=env_code, 
+                    clip_bound=clip_bound, vis_pred=vis_pred)
+        
     sil_coarse =  weights_coarse[:,:-1].sum(1)
     result = {'img_coarse': rgb_coarse,
               'depth_rnd': depth_rnd,
               'sil_coarse': sil_coarse,
-             }
-  
+              'ray_canonical': xyz_canonical,
+              'skin_backward': skin_backward_save
+             }   # CUSTOM
+    if return_alpha:    # CUSTOM
+        result['alphas'] = alphas
+
     # render visibility scores
     if render_vis:
         result['vis_pred'] = (vis_pred * weights_coarse).sum(-1)

@@ -6,26 +6,26 @@ testdir=$2
 # T_swing
 gtdir=database/T_swing/meshes/
 gt_pmat=database/T_swing/calibration/Camera1.Pmat.cal
-seqname=ama-female
+seqname=T_swing
 seqname_eval=T_swing1
 
 ## T_samba
-#gtdir=database/T_samba/meshes/
+# gtdir=database/T_samba/meshes/
 #gt_pmat=database/T_samba/calibration/Camera1.Pmat.cal
-#seqname=ama-female
-#seqname_eval=T_samba1
+# seqname=ama-female
+# seqname_eval=T_samba1
 
 ## eagle
-#gtdir=database/DAVIS/Meshes/Full-Resolution/a-eagle-1/
+#gtdir=database/DAVIS_syn/Meshes/Full-Resolution/a-eagle-1/
 #gt_pmat=canonical
 #seqname=a-eagle
 #seqname_eval=a-eagle-1
 
 ## hands
-#gtdir=database/DAVIS/Meshes/Full-Resolution/a-hands-1/
-#gt_pmat=canonical
-#seqname=a-hands
-#seqname_eval=a-hands-1
+# gtdir=database/DAVIS_syn/Meshes/Full-Resolution/a-hands-1/
+# gt_pmat=canonical
+# seqname=a-hands
+# seqname_eval=a-hands-1
 
 # this part is not needed it meshes are already extracted
 # model_path=$testdir/params_latest.pth
@@ -41,10 +41,11 @@ seqname_eval=T_swing1
 #                  $add_args
 
 # evaluation
-outfile=`cut -d/ -f2 <<<"${testdir}"`
+
 CUDA_VISIBLE_DEVICES=$dev python scripts/visualize/render_vis.py --testdir $testdir  --outpath $testdir/$seqname-eval-pred \
  --seqname $seqname_eval --test_frames "{0}" --vp 0  --gtdir $gtdir --gt_pmat ${gt_pmat} \
- > tmp/$outfile.txt
+ > $testdir/metric.txt
+
 CUDA_VISIBLE_DEVICES=$dev python scripts/visualize/render_vis.py --testdir $testdir  --outpath $testdir/$seqname-eval-gt \
  --seqname $seqname_eval --test_frames "{0}" --vp 0  --gtdir $gtdir --gt_pmat ${gt_pmat} --vis_gtmesh
 

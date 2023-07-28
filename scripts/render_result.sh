@@ -8,17 +8,20 @@ add_args=${*: 3:$#-1}
 prefix=$testdir/$seqname-$test_frames
 
 # part 1
+echo "extract.py"
 python extract.py --flagfile=$testdir/opts.log \
                   --seqname $seqname \
                   --model_path $model_path \
                   --test_frames $test_frames \
                   $add_args
+echo "render_vis.py --vis_cam"
 python scripts/visualize/render_vis.py --testdir $testdir \
                      --outpath $prefix-frz \
                      --seqname $seqname \
                      --test_frames $test_frames \
                      --freeze \
 #                     --vis_cam
+echo "render_vis.py --vis-bones"
 python scripts/visualize/render_vis.py --testdir $testdir \
                      --outpath $prefix-bne \
                      --seqname $seqname \
@@ -26,24 +29,28 @@ python scripts/visualize/render_vis.py --testdir $testdir \
                      --vp -1 \
                      --vis_bones \
 #                     --vis_traj
+echo "render_vis.py --vis_traj0"
 python scripts/visualize/render_vis.py --testdir $testdir \
                      --outpath $prefix-trj0 \
                      --seqname $seqname \
                      --test_frames $test_frames \
                      --vp 0 \
 #                     --vis_traj
+echo "render_vis.py --vis_traj1"
 python scripts/visualize/render_vis.py --testdir $testdir \
                      --outpath $prefix-trj1 \
                      --seqname $seqname \
                      --test_frames $test_frames \
                      --vp 1 \
 #                     --vis_traj
+echo "render_vis.py --vis_traj2"
 python scripts/visualize/render_vis.py --testdir $testdir \
                      --outpath $prefix-trj2 \
                      --seqname $seqname \
                      --test_frames $test_frames \
                      --vp 2 \
 #                     --vis_traj
+echo "render_vis.py --show_dp"
 python scripts/visualize/render_vis.py --testdir $testdir \
                      --outpath $prefix-vid \
                      --seqname $seqname \

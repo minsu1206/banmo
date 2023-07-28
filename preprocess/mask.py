@@ -56,6 +56,7 @@ predictor = DefaultPredictor(cfg)
 
 counter=0 
 frames = []
+print("mask.py : datadir ", datadir)
 for i,path in enumerate(sorted(glob.glob('%s/*'%datadir))):
     print(path)
     img = cv2.imread(path)
@@ -98,7 +99,9 @@ for i,path in enumerate(sorted(glob.glob('%s/*'%datadir))):
         mask_rszd = output == max_label
     
     mask_rszd = mask_rszd.astype(bool).astype(int)
-    if (mask_rszd.sum())<1000: continue
+    if (mask_rszd.sum())<1000: 
+        print("DEBUG : MASK SKIP : " ,'%s/%05d.png'%(maskdir,counter))
+        continue
     mask_rszd                 = mask_rszd  [pad:-pad,pad:-pad]
     img_rszd                   = img_rszd  [pad:-pad,pad:-pad]
     outputs.pred_masks=outputs.pred_masks[:,pad:-pad,pad:-pad]
@@ -108,7 +111,8 @@ for i,path in enumerate(sorted(glob.glob('%s/*'%datadir))):
                                 np.zeros((h_rszd, w_rszd, 1)),
                                 np.zeros((h_rszd, w_rszd, 1))],-1)
     mask = cv2.resize(mask_rszd,(w,h))
-
+    print("DEBUG : MASK DONE : " ,'%s/%05d.jpg'%(imgdir,counter))
+    print("DEBUG : MASK DONE : " ,'%s/%05d.png'%(maskdir,counter))
     cv2.imwrite('%s/%05d.jpg'%(imgdir,counter), img)
     cv2.imwrite('%s/%05d.png'%(maskdir,counter), mask)
     

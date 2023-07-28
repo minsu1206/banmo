@@ -4,6 +4,7 @@ seqname=$2
 addr=$3
 use_human=$4
 use_symm=$5
+bone=$6
 num_epochs=120
 batch_size=256
 
@@ -16,14 +17,15 @@ fi
 echo $pose_cnn_path
 
 # mode: line load
-savename=${model_prefix}-init
+savename=${model_prefix}-$bone-init
 bash scripts/template-mgpu.sh $gpus $savename \
     $seqname $addr --num_epochs $num_epochs \
   --pose_cnn_path $pose_cnn_path \
   --warmup_shape_ep 5 --warmup_rootmlp \
   --lineload --batch_size $batch_size\
   --${use_symm}symm_shape \
-  --${use_human}use_human
+  --${use_human}use_human \
+  --num_bones $bone
 
 # mode: pose correction
 # 0-80% body pose with proj loss, 80-100% gradually add all loss
@@ -40,8 +42,8 @@ bash scripts/template-mgpu.sh $gpus $savename \
   --dskin_steps 0 --fine_steps 1 --noanneal_freq \
   --freeze_proj --proj_end 1\
   --${use_symm}symm_shape \
-  --${use_human}use_human
-
+  --${use_human}use_human \
+  --num_bones $bone
 # mode: fine tune with active+fine samples, large rgb loss wt and reset beta
 loadname=${model_prefix}-ft1
 savename=${model_prefix}-ft2
@@ -55,4 +57,6 @@ bash scripts/template-mgpu.sh $gpus $savename \
   --dskin_steps 0 --fine_steps 0 --noanneal_freq \
   --freeze_root --use_unc --img_wt 1 --reset_beta \
   --${use_symm}symm_shape \
-  --${use_human}use_human
+  --${use_human}use_human \
+  --num_bones $bone
+

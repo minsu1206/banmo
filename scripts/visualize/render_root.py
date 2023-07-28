@@ -2,7 +2,7 @@
 import sys, os
 import pdb
 sys.path.append(os.path.dirname(os.path.dirname(sys.path[0])))
-os.environ["PYOPENGL_PLATFORM"] = "egl" #opengl seems to only work with TPU
+os.environ["PYOPENGL_PLATFORM"] = "osmesa" #opengl seems to only work with TPU
 curr_dir = os.path.abspath(os.getcwd())
 sys.path.insert(0,curr_dir)
 
@@ -108,7 +108,7 @@ def main():
         scene = Scene(ambient_light=0.4*np.asarray([1.,1.,1.,1.]))
         direc_l = pyrender.DirectionalLight(color=np.ones(3), intensity=6.0)
         colors= np.concatenate([0.6*colors[:,:3].astype(np.uint8), colors[:,3:]],-1)  # avoid overexposure
-            
+        
         smooth=True
         mesh = trimesh.Trimesh(vertices=np.asarray(verts[0,:,:3].cpu()), faces=np.asarray(refface[0].cpu()),vertex_colors=colors)
         meshr = Mesh.from_trimesh(mesh,smooth=smooth)

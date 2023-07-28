@@ -58,6 +58,7 @@ for infile in `ls -v $filedir/*$suffix`; do
     mkdir -p $finaloutdir/JPEGImages/Full-Resolution/$seqname
     mkdir -p $finaloutdir/Annotations/Full-Resolution/$seqname
     mkdir -p $finaloutdir/Densepose/Full-Resolution/$seqname
+    echo "preprocess/mask.py"
     python preprocess/mask.py $seqname $ishuman
   elif [ "$suffix" = ".zip" ]; then
     seqname=$(basename "$infile")
@@ -70,7 +71,7 @@ for infile in `ls -v $filedir/*$suffix`; do
     seqname=${seqname::-4}
     echo $seqname
   fi
-
+  echo "preprocess/compute_dp.py"
   python preprocess/compute_dp.py $seqname $ishuman
 
   # flow
@@ -79,13 +80,13 @@ for infile in `ls -v $filedir/*$suffix`; do
   cd -
 
   ## Optionally run SfM for initial root pose
-  #bash preprocess/colmap_to_data.sh $seqname $ishuman
+  # bash preprocess/colmap_to_data.sh $seqname $ishuman
 
   ## save to zips
-  #cd database/DAVIS/
-  #rm -i  $rootdir/$seqname.zip
-  #zip $rootdir/$seqname.zip -r  */Full-Resolution/$seqname/
-  #cd -
+  # cd database/DAVIS/
+  # rm -i  $rootdir/$seqname.zip
+  # zip $rootdir/$seqname.zip -r  */Full-Resolution/$seqname/
+  # cd -
 
   counter=$((counter+1))
 done

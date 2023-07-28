@@ -16,3 +16,8 @@ __pycache__/
 lasr_vcn/
 *.pyc
 .nfs*
+save_code
+visualize
+no_push
+pyopengl
+third_party

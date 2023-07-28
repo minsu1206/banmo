@@ -2,7 +2,7 @@
 
 import sys, os
 sys.path.append(os.path.dirname(os.path.dirname(sys.path[0])))
-os.environ["PYOPENGL_PLATFORM"] = "egl" #opengl seems to only work with TPU
+os.environ["PYOPENGL_PLATFORM"] = "osmesa" #opengl seems to only work with TPU
 sys.path.insert(0,'third_party')
 
 import subprocess
@@ -111,7 +111,7 @@ def main():
         imglist += dataset.imglist[:-1] # excluding the last frame
     rootlist =[imglist[i] for i in idx_render_root]
     imglist = [imglist[i] for i in idx_render]
-
+    # imglist = imglist[:2]
     seqname_list = []
     ## subsumple frames ##This may cause bug at nvs##
     #if len(imglist)>150:
@@ -156,7 +156,7 @@ def main():
                 name_root = rootlist[idx]
                 seqname_root = name_root.split('/')[-2]
                 fr_root = int(name_root.split('/')[-1].split('.')[-2])
-                cam = np.loadtxt('%s/%s-cam-%05d.txt'%(args.testdir, seqname_root, fr_root))
+                cam = np.loadtxt('%s/%s-cam-%05d.txt'%(args.testdir, seqname_root, fr_root))    # result : extract.py
                 all_cam.append(cam)
 
                 bone = trimesh.load('%s/%s-bone-%05d.obj'%(args.testdir, seqname,fr),process=False)
@@ -278,7 +278,7 @@ def main():
             print('%s'%(refname))
             img_size = max(refimg.shape)
             refmesh = all_mesh[i]
-            refcam = all_cam[i]
+            refcam = all_cam[i]     # 위의 cam = ~ # result of extract.py 와 같은 값.
 
         # load vertices
         refface = torch.Tensor(refmesh.faces[None]).cuda()
@@ -312,21 +312,29 @@ def main():
             vp_rmat = cv2.Rodrigues(np.asarray([np.pi/2,0,0]))[0]
         else:
             vp_rmat = cv2.Rodrigues(np.asarray([0.,0,0]))[0]
+            # print('DEBUG : render_vis.py - vp_rmat cv2.Rodrigues', vp_rmat) = Identity mat.
+
         refcam_vp = refcam.copy()
         #refcam_vp[:3,:3] = refcam_vp[:3,:3].dot(vp_rmat)
         refcam_vp[:3,:3] = vp_rmat.dot(refcam_vp[:3,:3])
+        # print('DEBUG : render_vis.py - after dot : ', refcam, refcam_vp) = both are same
+
         if args.vp==1 or args.vp==2:
             vmean = verts[0].mean(0).cpu()
             vp_tmat[:2] = (-refcam_vp[:3,:3].dot(vmean))[:2]
         refcam_vp[:3,3]  = vp_tmat
         refcam_vp[3]     = vp_kmat
+        # print('DEBUG : render_vis.py - ln327 : ', refcam_vp) # same
 
         # render
         Rmat =  torch.Tensor(refcam_vp[None,:3,:3]).cuda()
         Tmat =  torch.Tensor(refcam_vp[None,:3,3]).cuda()
+        # print("DEBUG : render_vis.py - ln332 : ", Rmat.shape, Tmat.shape) # (1,3,3), (1,3)
         ppoint =refcam_vp[3,2:]
         focal = refcam_vp[3,:2]
+        # print("DEBUG : render_vis.py - ln 335", type(ppoint), type(focal))
         verts = obj_to_cam(verts, Rmat, Tmat)
+        
         r = OffscreenRenderer(img_size, img_size)
         colors = refmesh.visual.vertex_colors
         
@@ -345,6 +353,7 @@ def main():
         # compute error if ground-truth is given
         if len(args.gtdir)>0:
             if len(gt_meshes)>0:
+                # print("DBEUG : render_vis.py : ln 348 - mesh tensorize")
                 verts_gt = torch.Tensor(gt_meshes[i].vertices[None]).cuda()
                 refface_gt=torch.Tensor(gt_meshes[i].faces[None]).cuda()
             else:
@@ -353,6 +362,7 @@ def main():
 
             #  ama camera coord -> scale -> our camera coord
             if args.gt_pmat!='canonical':
+                # print("DBEUG : render_vis.py : ln 357 - load gt cam matrix")
                 pmat = np.loadtxt(args.gt_pmat)
                 K,R,T,_,_,_,_=cv2.decomposeProjectionMatrix(pmat)
                 Rmat_gt = R
@@ -373,18 +383,24 @@ def main():
             #Rmat_gt = refcam_vp[:3,:3].dot(Rmat_gt)
             #Tmat_gt = refcam_vp[:3,:3].dot(Tmat_gt[...,None])[...,0] + refcam_vp[:3,3]
             # transform gt to camera
+            # print("DBEUG : render_vis.py : ln 386 - ppoint / focal : ", type(ppoint), type(focal))
             Rmat_gt = torch.Tensor(Rmat_gt).cuda()[None]
             Tmat_gt = torch.Tensor(Tmat_gt).cuda()[None]
+            # print("DBEUG : render_vis.py : ln 389 - verts_gt : ", verts_gt.shape, type(verts_gt))
+            # (1,3,3) , (1, 3) 
             # max length of axis aligned bbox
             bbox_max = float((verts_gt.max(1)[0]-verts_gt.min(1)[0]).max().cpu())
             verts_gt = obj_to_cam(verts_gt, Rmat_gt, Tmat_gt)
-
+            print('DEBUG : bbox_max : ', bbox_max)
+            
             import chamfer3D.dist_chamfer_3D
             import fscore
             chamLoss = chamfer3D.dist_chamfer_3D.chamfer_3DDist()
 
             ## use ICP for ours improve resutls
+            print("DEBUG : shape : ", verts_gt.shape, verts.shape)
             fitted_scale = verts_gt[...,-1].median() / verts[...,-1].median()
+            print('DEBUG : fitted_scale : ', fitted_scale)
             verts = verts*fitted_scale
 
             frts = pytorch3d.ops.iterative_closest_point(verts,verts_gt, \
@@ -395,8 +411,9 @@ def main():
             #t=trimesh.Trimesh(verts[0].cpu()).export('tmp/0.obj')
             #t=trimesh.Trimesh(verts_gt[0].cpu()).export('tmp/1.obj')
             #pdb.set_trace()
-           
+
             raw_cd,raw_cd_back,_,_ = chamLoss(verts_gt,verts)  # this returns distance squared
+            print("DEBUG : ChamLoss : ", raw_cd, raw_cd_back)
             f1,_,_ = fscore.fscore(raw_cd, raw_cd_back,
                            threshold = (bbox_max*0.01)**2)
             f2,_,_ = fscore.fscore(raw_cd, raw_cd_back,
@@ -457,14 +474,14 @@ def main():
             mesh_cam_transformed._primitives[0].material.RoughnessFactor=1.
             scene.add_node( Node(mesh=mesh_cam_transformed))
 
-        floor_mesh = trimesh.load('./mesh_material/wood.obj',process=False)
-        floor_mesh.vertices = np.concatenate([floor_mesh.vertices[:,:1], floor_mesh.vertices[:,2:3], floor_mesh.vertices[:,1:2]],-1 )
-        xfloor = 10*mesh.vertices[:,0].min() + (10*mesh.vertices[:,0].max()-10*mesh.vertices[:,0].min())*(floor_mesh.vertices[:,0:1] - floor_mesh.vertices[:,0].min())/(floor_mesh.vertices[:,0].max()-floor_mesh.vertices[:,0].min()) 
-        yfloor = floor_mesh.vertices[:,1:2]; yfloor[:] = (mesh.vertices[:,1].max())
-        zfloor = 0.5*mesh.vertices[:,2].min() + (10*mesh.vertices[:,2].max()-0.5*mesh.vertices[:,2].min())*(floor_mesh.vertices[:,2:3] - floor_mesh.vertices[:,2].min())/(floor_mesh.vertices[:,2].max()-floor_mesh.vertices[:,2].min())
-        floor_mesh.vertices = np.concatenate([xfloor,yfloor,zfloor],-1)
-        floor_mesh = trimesh.Trimesh(floor_mesh.vertices, floor_mesh.faces, vertex_colors=255*np.ones((4,4), dtype=np.uint8))
         if args.floor:
+            floor_mesh = trimesh.load('./mesh_material/wood.obj',process=False)
+            floor_mesh.vertices = np.concatenate([floor_mesh.vertices[:,:1], floor_mesh.vertices[:,2:3], floor_mesh.vertices[:,1:2]],-1 )
+            xfloor = 10*mesh.vertices[:,0].min() + (10*mesh.vertices[:,0].max()-10*mesh.vertices[:,0].min())*(floor_mesh.vertices[:,0:1] - floor_mesh.vertices[:,0].min())/(floor_mesh.vertices[:,0].max()-floor_mesh.vertices[:,0].min()) 
+            yfloor = floor_mesh.vertices[:,1:2]; yfloor[:] = (mesh.vertices[:,1].max())
+            zfloor = 0.5*mesh.vertices[:,2].min() + (10*mesh.vertices[:,2].max()-0.5*mesh.vertices[:,2].min())*(floor_mesh.vertices[:,2:3] - floor_mesh.vertices[:,2].min())/(floor_mesh.vertices[:,2].max()-floor_mesh.vertices[:,2].min())
+            floor_mesh.vertices = np.concatenate([xfloor,yfloor,zfloor],-1)
+            floor_mesh = trimesh.Trimesh(floor_mesh.vertices, floor_mesh.faces, vertex_colors=255*np.ones((4,4), dtype=np.uint8))
             scene.add_node( Node(mesh=Mesh.from_trimesh(floor_mesh))) # overrides the prev. one
        
         if args.cam_type=='perspective': 
