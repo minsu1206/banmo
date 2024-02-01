@@ -15,6 +15,8 @@ cudnn.benchmark = True
 
 from nnutils.train_utils import v2s_trainer
 
+import wandb
+
 opts = flags.FLAGS
 
 def main(_):
@@ -28,6 +30,8 @@ def main(_):
     )
     print('%d/%d'%(world_size,opts.local_rank))
 
+    if opts.local_rank == 0:
+        wandb.init(project='research', name=opts.logname, sync_tensorboard=True)
     torch.manual_seed(0)
     torch.cuda.manual_seed(1)
     torch.manual_seed(0)
@@ -37,6 +41,8 @@ def main(_):
     trainer.define_model(data_info)
     trainer.init_training()
     trainer.train()
+    if opts.local_rank == 0:
+        wandb.finish()
 
 if __name__ == '__main__':
     app.run(main)

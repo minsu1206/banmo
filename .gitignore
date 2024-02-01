@@ -16,3 +16,6 @@ __pycache__/
 lasr_vcn/
 *.pyc
 .nfs*
+wandb
+third_party/*
+meao

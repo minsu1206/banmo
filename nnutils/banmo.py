@@ -164,6 +164,9 @@ flags.DEFINE_bool('rm_novp', True,'whether to remove loss on non-overlapping pxs
 # for scripts/visualize/match.py
 flags.DEFINE_string('match_frames', '0 1', 'a list of frame index')
 
+# 0201
+flags.DEFINE_string('deform_path', '', 'path to trained deformation network path')
+
 class banmo(nn.Module):
     def __init__(self, opts, data_info):
         super(banmo, self).__init__()

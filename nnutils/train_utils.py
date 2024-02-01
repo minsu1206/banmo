@@ -26,7 +26,7 @@ import torch.nn.functional as F
 import trimesh
 import torchvision
 from torch.autograd import Variable
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 from pytorch3d import transforms
 from torch.nn.utils import clip_grad_norm_
 from matplotlib.pyplot import cm
@@ -90,6 +90,15 @@ class v2s_trainer():
         if opts.model_path!='':
             self.load_network(opts.model_path, is_eval=self.is_eval)
 
+        if opts.deform_path != '':
+            swap_ckpt = torch.load(opts.deform_path, map_location='cpu')['nerf_body_rts']
+            deform_ckpt = OrderedDict()
+            for k, v in swap_ckpt.items():
+                if 'body_rts' in k:
+                    deform_ckpt[k] = v
+            self.model.nerf_body_rts.load_state_dict(deform_ckpt, strict=True)
+            self.model.nerf_body_rts.eval()
+            
         if self.is_eval:
             self.model = self.model.to(self.device)
         else:
