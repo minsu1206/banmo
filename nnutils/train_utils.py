@@ -91,11 +91,12 @@ class v2s_trainer():
             self.load_network(opts.model_path, is_eval=self.is_eval)
 
         if opts.deform_path != '':
-            swap_ckpt = torch.load(opts.deform_path, map_location='cpu')['nerf_body_rts']
+            swap_ckpt = torch.load(opts.deform_path, map_location='cpu')
+            swap_ckpt = self.rm_module_prefix(swap_ckpt)
             deform_ckpt = OrderedDict()
             for k, v in swap_ckpt.items():
                 if 'body_rts' in k:
-                    deform_ckpt[k] = v
+                    deform_ckpt[k.replace('nerf_body_rts.', '')] = v
             self.model.nerf_body_rts.load_state_dict(deform_ckpt, strict=True)
             self.model.nerf_body_rts.eval()
             
