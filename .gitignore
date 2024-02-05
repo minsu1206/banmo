@@ -17,5 +17,5 @@ lasr_vcn/
 *.pyc
 .nfs*
 wandb
-third_party/*z
+third_party/*
 meao
