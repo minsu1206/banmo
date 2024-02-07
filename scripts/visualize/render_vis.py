@@ -2,7 +2,7 @@
 
 import sys, os
 sys.path.append(os.path.dirname(os.path.dirname(sys.path[0])))
-os.environ["PYOPENGL_PLATFORM"] = "egl" #opengl seems to only work with TPU
+os.environ["PYOPENGL_PLATFORM"] = "osmesa" #opengl seems to only work with TPU
 sys.path.insert(0,'third_party')
 
 import subprocess
